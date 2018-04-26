@@ -21,7 +21,26 @@ const BlockchainRequestors = {
     }
 };
 
-function Candy(nodeList) {
+
+
+
+const formatToken = require('./formatToken');
+const SIGN_TYPE = 'sha256';
+
+
+/*
+https://github.com/wwwtyro/cryptico
+
+https://github.com/kjur/jsrsasign
+https://kjur.github.io/jsrsasign/sample/sample-rsasign.html
+
+https://github.com/crypto-browserify/crypto-browserify
+ */
+
+
+
+
+function Candy(nodeList, walletFile, config) {
     'use strict';
     let that = this;
     this.maxConnections = 30;
@@ -36,6 +55,83 @@ function Candy(nodeList) {
     this._autoloader = undefined;
 
     this.getid = () => (Math.random() * (new Date().getTime())).toString(36).replace(/[^a-z]+/g, '');
+
+
+
+
+
+    if(typeof config === 'undefined') {
+        config = {
+            precision: 1000000,
+        };
+    }
+
+    this.enableLogging = true;
+
+    this.log = function (string) {
+        if(this.enableLogging) {
+            console.log(string);
+        }
+    };
+
+    this.id = '';
+
+    /**
+     * Block number, where was defined
+     * @type {number}
+     */
+    this.block = -1;
+
+    /**
+     * RSA keys
+     */
+    this.keysPair = {public: '', private: ''};
+
+    /**
+     * Another data
+     */
+    this.data = {};
+
+    /**
+     * Balance (only for cache)
+     */
+    this.balance = 0.00;
+
+    /**
+     * Just list of saved addresses
+     */
+    this.addressBook = {};
+
+    /**
+     Кошелёк утверждён блокчейном
+     */
+    this.accepted = false;
+
+    this.walletFile = walletFile;
+
+    if(typeof walletFile !== 'undefined' && walletFile) {
+        try {
+            let walletData = JSON.parse(fs.readFileSync(walletFile));
+            this.id = walletData.id;
+            this.keysPair = walletData.keysPair;
+            this.data = walletData.data;
+            this.balance = walletData.balance;
+            this.addressBook = walletData.addressBook;
+            this.block = walletData.block;
+            this.accepted = walletData.accepted;
+
+        } catch (e) {
+            this.log('Error: Invalid file!');
+        }
+    }
+
+
+
+
+
+
+
+
 
     /**
      * Current reciever address. Override allowed
@@ -396,6 +492,81 @@ function Candy(nodeList) {
         let message = BlockchainRequestors.queryAllMsg(blockId);
         that.broadcast(JSON.stringify(message));
     };
+
+
+
+
+
+
+
+
+    /**
+     * Write current state to file
+     * @returns {boolean}
+     */
+    this.save = function () {
+        try {
+            fs.writeFileSync(this.walletFile, JSON.stringify(this))
+        } catch (e) {
+            return false;
+        }
+
+        return true;
+    };
+
+
+    /**
+     * Signs data
+     * @param data
+     * @param key
+     * @returns {{data: *, sign: *}}
+     */
+    this.signData = function (data, key) {
+        const sign = crypto.createSign(SIGN_TYPE);
+        sign.update(data);
+        let signKey = sign.sign(typeof key === 'undefined' ? this.keysPair.private : key).toString('hex');
+        return {data: data, sign: signKey};
+    };
+
+
+    this.signBlock = function (unsignedBlock) {
+        if(unsignedBlock.isSigned()) {
+            return unsignedBlock;
+        }
+        unsignedBlock.sign = this.signData(unsignedBlock.data).sign;
+        unsignedBlock.pubkey = this.keysPair.public;
+        return unsignedBlock;
+    };
+
+
+    /**
+     * Verify data sign
+     * @param data
+     * @param sign
+     * @param key
+     * @returns {boolean}
+     */
+    this.verifyData = function (data, sign, key) {
+        if(typeof  data === 'object') {
+            sign = data.sign;
+            data = data.data;
+        }
+        const verify = crypto.createVerify(SIGN_TYPE);
+        verify.update(data);
+        return verify.verify(typeof key === 'undefined' ? this.keysPair.public : key, sign, 'hex');
+    };
+
+
+    this.update = function () {
+        this.log('Info: Wallet balance: ' + formatToken(this.balance, config.precision));
+        this.save();
+    };
+
+
+
+
+
+
 
     return this;
 }
